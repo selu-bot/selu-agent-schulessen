@@ -1,13 +1,17 @@
 import json
+import time
 import unittest
-
+from http.cookiejar import Cookie, CookieJar
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "capabilities" / "schulessen" / "container"))
 
 from schulessen_client import (  # noqa: E402
+    AuthenticationError,
+    SchulessenClient,
     _decode_possible_json,
     _extract_hidden_fields,
     _normalize_cart,
@@ -123,6 +127,153 @@ class SchulessenClientTests(unittest.TestCase):
         self.assertEqual(normalized["active_item_count"], 0)
         self.assertEqual(normalized["cancelled_item_count"], 1)
         self.assertEqual(normalized["cancelled_items"][0]["status"], "cancelled")
+
+
+def _make_aspxauth_cookie(expires: float | None = None) -> Cookie:
+    """Create a fake .ASPXAUTH cookie for testing."""
+    return Cookie(
+        version=0,
+        name=".ASPXAUTH",
+        value="fake-token",
+        port=None,
+        port_specified=False,
+        domain="www.schulessen.net",
+        domain_specified=True,
+        domain_initial_dot=False,
+        path="/",
+        path_specified=True,
+        secure=False,
+        expires=int(expires) if expires is not None else None,
+        discard=expires is None,
+        comment=None,
+        comment_url=None,
+        rest={},
+    )
+
+
+class SessionExpiryRetryTests(unittest.TestCase):
+    """Tests for automatic re-login when the session expires."""
+
+    def _make_client(self) -> SchulessenClient:
+        client = SchulessenClient(base_url="https://www.schulessen.net")
+        client.set_credentials("user", "pass")
+        return client
+
+    def test_is_authenticated_returns_false_when_no_cookie(self):
+        client = self._make_client()
+        self.assertFalse(client.is_authenticated())
+
+    def test_is_authenticated_returns_true_with_valid_cookie(self):
+        client = self._make_client()
+        future = time.time() + 3600
+        client.cookie_jar.set_cookie(_make_aspxauth_cookie(expires=future))
+        self.assertTrue(client.is_authenticated())
+
+    def test_is_authenticated_returns_true_with_no_expiry_cookie(self):
+        client = self._make_client()
+        client.cookie_jar.set_cookie(_make_aspxauth_cookie(expires=None))
+        self.assertTrue(client.is_authenticated())
+
+    def test_is_authenticated_returns_false_with_expired_cookie(self):
+        client = self._make_client()
+        past = time.time() - 3600
+        client.cookie_jar.set_cookie(_make_aspxauth_cookie(expires=past))
+        self.assertFalse(client.is_authenticated())
+        # Cookie jar should be cleared
+        self.assertEqual(len(list(client.cookie_jar)), 0)
+
+    def test_call_api_retries_on_html_response(self):
+        """When the server returns HTML (login page) instead of JSON,
+        _decode_api_response raises AuthenticationError. The retry in
+        _call_api must catch it, re-login, and succeed on the second try."""
+        client = self._make_client()
+
+        # Pre-seed a valid cookie so is_authenticated() returns True initially
+        future = time.time() + 3600
+        client.cookie_jar.set_cookie(_make_aspxauth_cookie(expires=future))
+
+        html_login_page = '<!DOCTYPE html><html><body><form id="login"></form></body></html>'
+        valid_json = json.dumps({"d": json.dumps({"success": True, "parameter": "[]"})})
+
+        call_count = {"request": 0}
+
+        def fake_request_text(method, path, data=None, headers=None):
+            call_count["request"] += 1
+            if call_count["request"] == 1:
+                # First API call returns HTML (expired session)
+                return html_login_page
+            # After re-login, return valid JSON
+            return valid_json
+
+        with patch.object(client, "_request_text", side_effect=fake_request_text), \
+             patch.object(client, "login") as mock_login:
+            result = client._call_api("/vorbesteller/OrderForm.aspx/MenuOffer", {})
+
+        # login() should have been called exactly once for re-authentication
+        mock_login.assert_called_once()
+        # The result should be the decoded valid response
+        self.assertEqual(result, [])
+
+    def test_call_api_retries_on_http_401(self):
+        """When _request_text raises AuthenticationError (HTTP 401/403),
+        _call_api must re-login and retry."""
+        client = self._make_client()
+
+        future = time.time() + 3600
+        client.cookie_jar.set_cookie(_make_aspxauth_cookie(expires=future))
+
+        valid_json = json.dumps({"d": json.dumps({"success": True, "parameter": "[]"})})
+
+        call_count = {"request": 0}
+
+        def fake_request_text(method, path, data=None, headers=None):
+            call_count["request"] += 1
+            if call_count["request"] == 1:
+                raise AuthenticationError("schulessen.net rejected the session")
+            return valid_json
+
+        with patch.object(client, "_request_text", side_effect=fake_request_text), \
+             patch.object(client, "login") as mock_login:
+            result = client._call_api("/vorbesteller/OrderForm.aspx/MenuOffer", {})
+
+        mock_login.assert_called_once()
+        self.assertEqual(result, [])
+
+    def test_call_api_raises_after_retry_exhausted(self):
+        """When re-login also fails, AuthenticationError must propagate."""
+        client = self._make_client()
+
+        future = time.time() + 3600
+        client.cookie_jar.set_cookie(_make_aspxauth_cookie(expires=future))
+
+        html_login_page = '<!DOCTYPE html><html><body><form id="login"></form></body></html>'
+
+        def always_html(method, path, data=None, headers=None):
+            return html_login_page
+
+        with patch.object(client, "_request_text", side_effect=always_html), \
+             patch.object(client, "login"):
+            with self.assertRaises(AuthenticationError):
+                client._call_api("/vorbesteller/OrderForm.aspx/MenuOffer", {})
+
+    def test_call_api_triggers_login_when_not_authenticated(self):
+        """When is_authenticated() returns False, login() is called before
+        the first request."""
+        client = self._make_client()
+        # No cookie → not authenticated
+
+        valid_json = json.dumps({"d": json.dumps({"success": True, "parameter": "[]"})})
+
+        def fake_request_text(method, path, data=None, headers=None):
+            return valid_json
+
+        with patch.object(client, "_request_text", side_effect=fake_request_text), \
+             patch.object(client, "login") as mock_login:
+            result = client._call_api("/vorbesteller/OrderForm.aspx/MenuOffer", {})
+
+        # login() called because is_authenticated() was False
+        mock_login.assert_called_once()
+        self.assertEqual(result, [])
 
 
 if __name__ == "__main__":

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from http.cookiejar import CookieJar
@@ -9,6 +11,8 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import HTTPCookieProcessor, Request, build_opener
+
+logger = logging.getLogger(__name__)
 
 
 class SchulessenError(RuntimeError):
@@ -417,7 +421,15 @@ class SchulessenClient:
         return {"authenticated": True}
 
     def is_authenticated(self) -> bool:
-        return any("ASPXAUTH" in cookie.name.upper() for cookie in self.cookie_jar)
+        now = time.time()
+        for cookie in self.cookie_jar:
+            if "ASPXAUTH" in cookie.name.upper():
+                if cookie.expires is not None and cookie.expires < now:
+                    logger.info("ASPXAUTH cookie expired (expires=%s, now=%s), clearing session", cookie.expires, now)
+                    self.cookie_jar.clear()
+                    return False
+                return True
+        return False
 
     def get_menu(
         self,
@@ -564,14 +576,15 @@ class SchulessenClient:
                     "X-Requested-With": "XMLHttpRequest",
                 },
             )
+            raw = self._decode_api_response(text)
         except AuthenticationError:
             if retry:
+                logger.info("Session expired, re-authenticating for %s", path)
                 self.cookie_jar.clear()
                 self.login()
                 return self._call_api(path, payload, retry=False)
             raise
 
-        raw = self._decode_api_response(text)
         return raw
 
     def _decode_api_response(self, text: str) -> Any:
