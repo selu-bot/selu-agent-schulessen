@@ -75,9 +75,60 @@ jobs:
         run: |
           sha=$(sha256sum agent.tar.gz | awk '{print $1}')
           echo "sha256=${sha}" >> "$GITHUB_OUTPUT"
+          echo "### Archive SHA-256" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "${sha}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           files: agent.tar.gz
           generate_release_notes: true
+          body: |
+            ## Installation
+
+            Install from the Selu marketplace UI, or use these details for manual configuration:
+
+            **Archive URL:**
+            ```
+            https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/agent.tar.gz
+            ```
+
+            **Archive SHA-256:**
+            ```
+            ${{ steps.sha.outputs.sha256 }}
+            ```
+
+            **Capability image:**
+            ```
+            ${{ env.REGISTRY }}/${{ steps.meta.outputs.cap_image }}:${{ steps.version.outputs.version }}
+            ```
+
+            ### Marketplace JSON entry
+
+            ```json
+            {
+              "id": "schulessen",
+              "name": "School Lunch Assistant",
+              "description": "School lunch menu and ordering agent for schulessen.net.",
+              "version": "${{ steps.version.outputs.version }}",
+              "author": "Selu Team",
+              "archive_url": "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/agent.tar.gz",
+              "archive_sha256": "${{ steps.sha.outputs.sha256 }}",
+              "capability_images": ["${{ env.REGISTRY }}/${{ steps.meta.outputs.cap_image }}:${{ steps.version.outputs.version }}"]
+            }
+            ```
+
+      - name: Notify Selu marketplace
+        run: |
+          curl -sf -X POST \
+            "${{ secrets.SELU_WEBHOOK_URL }}" \
+            -H "Authorization: Bearer ${{ secrets.SELU_WEBHOOK_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "version": "${{ steps.version.outputs.version }}",
+              "archive_url": "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/agent.tar.gz",
+              "archive_sha256": "${{ steps.sha.outputs.sha256 }}",
+              "capability_images": ["${{ env.REGISTRY }}/${{ steps.meta.outputs.cap_image }}:${{ steps.version.outputs.version }}"]
+            }'
