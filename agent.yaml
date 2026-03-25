@@ -1,0 +1,14 @@
+id: schulessen
+name: School Lunch Assistant
+i18n:
+  default_locale: de
+  supported_locales:
+    - de
+    - en
+routing: inline
+session:
+  trigger: mention
+  idle_timeout_minutes: 30
+memory:
+  policy: none
+  top_k: 0

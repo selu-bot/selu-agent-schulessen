@@ -1,0 +1,116 @@
+id: schulessen
+class: tool
+image: selu-cap-schulessen:latest
+
+tools:
+  - name: get_menu
+    description: >
+      Get the live school lunch menu for a date range. Returns meals grouped by
+      day with menu IDs, names, descriptions, prices, and availability.
+    input_schema:
+      type: object
+      properties:
+        from_date:
+          type: string
+          description: "Start date in YYYY-MM-DD format. Defaults to today."
+        to_date:
+          type: string
+          description: "End date in YYYY-MM-DD format. Defaults to the same week as from_date."
+        include_inactive:
+          type: boolean
+          description: "Include meals that are listed but not currently active. Default false."
+      required: []
+    recommended_policy: allow
+
+  - name: get_cart
+    description: >
+      Get the current schulessen.net shopping cart or order overview. Useful
+      before placing or cancelling a lunch order. The result separates active
+      orders from cancelled history entries.
+    input_schema:
+      type: object
+      properties:
+        from_date:
+          type: string
+          description: "Start date in YYYY-MM-DD format. Defaults to today."
+        to_date:
+          type: string
+          description: "End date in YYYY-MM-DD format. Defaults to the same week as from_date."
+      required: []
+    recommended_policy: allow
+
+  - name: place_order
+    description: >
+      Place a lunch order for a specific date and meal ID. Refuses to submit if
+      unexpected pending cart items already exist unless explicitly allowed.
+    input_schema:
+      type: object
+      properties:
+        date:
+          type: string
+          description: "School day in YYYY-MM-DD format."
+        meal_id:
+          type: integer
+          description: "Meal or menu line ID from get_menu."
+        quantity:
+          type: integer
+          description: "How many portions to order. Default 1."
+        outlet_slot_id:
+          type: integer
+          description: "Outlet slot ID. Defaults to 1."
+        allow_checkout_existing_cart:
+          type: boolean
+          description: "Allow checkout even if the cart already contains other items. Default false."
+        components:
+          type: array
+          description: "Optional component selections required by some meals."
+          items:
+            type: object
+      required:
+        - date
+        - meal_id
+    recommended_policy: ask
+
+  - name: cancel_order
+    description: >
+      Cancel a lunch order or remove a pending cart item. Requires the date and
+      meal ID; transaction ID is optional but recommended.
+    input_schema:
+      type: object
+      properties:
+        date:
+          type: string
+          description: "School day in YYYY-MM-DD format."
+        meal_id:
+          type: integer
+          description: "Meal or menu line ID to cancel."
+        transaction_id:
+          type: string
+          description: "Exact transaction ID from get_cart. Optional if the tool can resolve it unambiguously."
+      required:
+        - date
+        - meal_id
+    recommended_policy: ask
+
+network:
+  mode: allowlist
+  hosts:
+    - "www.schulessen.net:443"
+
+filesystem: temp
+
+credentials:
+  - name: USERNAME
+    scope: user
+    required: true
+    description: "schulessen.net username or card number"
+  - name: PASSWORD
+    scope: user
+    required: true
+    description: "schulessen.net password"
+
+resources:
+  max_memory_mb: 128
+  max_cpu_fraction: 0.5
+  max_cpu_seconds: 30
+  pids_limit: 64
