@@ -344,17 +344,22 @@ class LoginCredentials:
     password: str
 
 
+SESSION_MAX_AGE_SECONDS = 15 * 60  # 15 minutes – well within ASP.NET's default 20-min timeout
+
+
 class SchulessenClient:
     def __init__(self, base_url: str = "https://www.schulessen.net") -> None:
         self.base_url = base_url.rstrip("/")
         self.cookie_jar = CookieJar()
         self.opener = build_opener(HTTPCookieProcessor(self.cookie_jar))
         self._credentials: LoginCredentials | None = None
+        self._authenticated_at: float | None = None
 
     def set_credentials(self, username: str, password: str) -> None:
         creds = LoginCredentials(username=username, password=password)
         if self._credentials != creds:
             self.cookie_jar.clear()
+            self._authenticated_at = None
             self._credentials = creds
 
     def login(self) -> dict[str, Any]:
@@ -418,15 +423,42 @@ class SchulessenClient:
         if not self.is_authenticated() and "window.close()" not in response:
             raise AuthenticationError("Couldn't sign in to schulessen.net. Check username and password.")
 
+        self._authenticated_at = time.time()
+        logger.info("Successfully authenticated to schulessen.net")
         return {"authenticated": True}
 
     def is_authenticated(self) -> bool:
         now = time.time()
+
+        # Guard 1: proactive time-based expiry.
+        # ASP.NET session cookies often lack an "expires" attribute, so the
+        # CookieJar never considers them stale.  We track when we last
+        # successfully logged in and treat the session as dead once
+        # SESSION_MAX_AGE_SECONDS have elapsed.
+        if self._authenticated_at is not None:
+            age = now - self._authenticated_at
+            if age >= SESSION_MAX_AGE_SECONDS:
+                logger.info(
+                    "Session age %.0fs exceeds max %ds, clearing session",
+                    age,
+                    SESSION_MAX_AGE_SECONDS,
+                )
+                self.cookie_jar.clear()
+                self._authenticated_at = None
+                return False
+
+        # Guard 2: cookie-level expiry (for cookies that *do* carry an
+        # explicit expiry timestamp).
         for cookie in self.cookie_jar:
             if "ASPXAUTH" in cookie.name.upper():
                 if cookie.expires is not None and cookie.expires < now:
-                    logger.info("ASPXAUTH cookie expired (expires=%s, now=%s), clearing session", cookie.expires, now)
+                    logger.info(
+                        "ASPXAUTH cookie expired (expires=%s, now=%s), clearing session",
+                        cookie.expires,
+                        now,
+                    )
                     self.cookie_jar.clear()
+                    self._authenticated_at = None
                     return False
                 return True
         return False
@@ -581,6 +613,7 @@ class SchulessenClient:
             if retry:
                 logger.info("Session expired, re-authenticating for %s", path)
                 self.cookie_jar.clear()
+                self._authenticated_at = None
                 self.login()
                 return self._call_api(path, payload, retry=False)
             raise
