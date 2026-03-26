@@ -538,7 +538,8 @@ class SchulessenClient:
                 "oid_mlinie": str(int(meal_id)),
             },
         )
-        after = self.get_cart()
+        pay_result = self._call_api("/vorbesteller/OrderForm.aspx/ShoppingCardPay", {})
+        after = self.get_cart_for_range(meal_date, meal_date)
         return {
             "status": "cancelled",
             "date": meal_date,
@@ -546,6 +547,7 @@ class SchulessenClient:
             "transaction_id": str(resolved_transaction),
             "cart_after": after,
             "delete_result": _decode_possible_json(delete_result),
+            "pay_result": _decode_possible_json(pay_result),
         }
 
     def _call_api(self, path: str, payload: dict[str, Any], retry: bool = True) -> Any:
