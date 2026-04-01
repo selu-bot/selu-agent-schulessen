@@ -1,0 +1,35 @@
+agent:
+  name: School Lunch Assistant
+  description: School lunch agent for Selu with live menu and order access via schulessen.net.
+  long_description: This agent can check the lunch menu, show current lunch orders, place an order, and cancel an order.
+
+capabilities:
+  schulessen:
+    tools:
+      get_menu:
+        display_name: Get menu
+        description: Fetch the live lunch menu for one or more school days.
+      get_cart:
+        display_name: Get orders
+        description: Show the current lunch cart or order overview from schulessen.net.
+      place_order:
+        display_name: Place order
+        description: Place a lunch order for a specific day and meal.
+      cancel_order:
+        display_name: Cancel order
+        description: Cancel a lunch order or remove a pending meal from the cart.
+
+approval:
+  tools:
+    schulessen__get_menu:
+      label: Get menu
+      message: I want to check the live lunch menu for you.
+    schulessen__get_cart:
+      label: Get orders
+      message: I want to check the current lunch orders for you.
+    schulessen__place_order:
+      label: Place order
+      message: I want to place this lunch order for you.
+    schulessen__cancel_order:
+      label: Cancel order
+      message: I want to cancel this lunch order for you.
