@@ -17,7 +17,7 @@ capabilities:
         description: Place a lunch order for a specific day and meal.
       cancel_order:
         display_name: Cancel order
-        description: Cancel a lunch order or remove a pending meal from the cart.
+        description: Cancel a confirmed lunch order after checking cancellation permission.
 
 approval:
   tools:

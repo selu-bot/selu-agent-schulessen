@@ -1,9 +1,9 @@
 import json
 import time
 import unittest
-from http.cookiejar import Cookie, CookieJar
+from http.cookiejar import Cookie
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,7 +52,7 @@ class SchulessenClientTests(unittest.TestCase):
                     "dayoffer": [
                         {
                             "datum": "2026-03-30",
-                            "is_todeliver": False,
+                            "is_todeliver": True,
                             "menus": [
                                 {
                                     "id_menuline": 407,
@@ -88,6 +88,7 @@ class SchulessenClientTests(unittest.TestCase):
                             "date_delivery": "2026-03-30",
                             "name_menuline": "Menue 1",
                             "units_ordered": 1,
+                            "units_saved": 1,
                             "price_per_unit": {"value": 385, "currency": "EUR"},
                             "payable_amount": {"value": 0, "currency": "EUR"},
                             "is_cancelcation_allowed": True,
@@ -117,7 +118,8 @@ class SchulessenClientTests(unittest.TestCase):
                             "date_delivery": "2026-03-30",
                             "name_menuline": "Menue 1",
                             "units_ordered": 0,
-                            "payable_amount": {"value": -385, "currency": "EUR"},
+                            "units_saved": 0,
+                            "payable_amount": {"value": 0, "currency": "EUR"},
                             "price_per_unit": {"value": 385, "currency": "EUR"},
                         }
                     ]
@@ -195,7 +197,9 @@ class SessionExpiryRetryTests(unittest.TestCase):
         future = time.time() + 3600
         client.cookie_jar.set_cookie(_make_aspxauth_cookie(expires=future))
 
-        html_login_page = '<!DOCTYPE html><html><body><form id="login"></form></body></html>'
+        html_login_page = (
+            '<!DOCTYPE html><html><body><form id="login"></form></body></html>'
+        )
         valid_json = json.dumps({"d": json.dumps({"success": True, "parameter": "[]"})})
 
         call_count = {"request": 0}
@@ -208,8 +212,10 @@ class SessionExpiryRetryTests(unittest.TestCase):
             # After re-login, return valid JSON
             return valid_json
 
-        with patch.object(client, "_request_text", side_effect=fake_request_text), \
-             patch.object(client, "login") as mock_login:
+        with (
+            patch.object(client, "_request_text", side_effect=fake_request_text),
+            patch.object(client, "login") as mock_login,
+        ):
             result = client._call_api("/vorbesteller/OrderForm.aspx/MenuOffer", {})
 
         # login() should have been called exactly once for re-authentication
@@ -235,8 +241,10 @@ class SessionExpiryRetryTests(unittest.TestCase):
                 raise AuthenticationError("schulessen.net rejected the session")
             return valid_json
 
-        with patch.object(client, "_request_text", side_effect=fake_request_text), \
-             patch.object(client, "login") as mock_login:
+        with (
+            patch.object(client, "_request_text", side_effect=fake_request_text),
+            patch.object(client, "login") as mock_login,
+        ):
             result = client._call_api("/vorbesteller/OrderForm.aspx/MenuOffer", {})
 
         mock_login.assert_called_once()
@@ -249,13 +257,17 @@ class SessionExpiryRetryTests(unittest.TestCase):
         future = time.time() + 3600
         client.cookie_jar.set_cookie(_make_aspxauth_cookie(expires=future))
 
-        html_login_page = '<!DOCTYPE html><html><body><form id="login"></form></body></html>'
+        html_login_page = (
+            '<!DOCTYPE html><html><body><form id="login"></form></body></html>'
+        )
 
         def always_html(method, path, data=None, headers=None):
             return html_login_page
 
-        with patch.object(client, "_request_text", side_effect=always_html), \
-             patch.object(client, "login"):
+        with (
+            patch.object(client, "_request_text", side_effect=always_html),
+            patch.object(client, "login"),
+        ):
             with self.assertRaises(AuthenticationError):
                 client._call_api("/vorbesteller/OrderForm.aspx/MenuOffer", {})
 
@@ -270,8 +282,10 @@ class SessionExpiryRetryTests(unittest.TestCase):
         def fake_request_text(method, path, data=None, headers=None):
             return valid_json
 
-        with patch.object(client, "_request_text", side_effect=fake_request_text), \
-             patch.object(client, "login") as mock_login:
+        with (
+            patch.object(client, "_request_text", side_effect=fake_request_text),
+            patch.object(client, "login") as mock_login,
+        ):
             result = client._call_api("/vorbesteller/OrderForm.aspx/MenuOffer", {})
 
         # login() called because is_authenticated() was False
@@ -344,6 +358,7 @@ class SessionMaxAgeTests(unittest.TestCase):
             call_count["n"] += 1
             if call_count["n"] <= 3:
                 return login_html  # GET login page + 2 JS fetches
+            client.cookie_jar.set_cookie(_make_aspxauth_cookie())
             return "<html>window.close()</html>"  # POST response
 
         with patch.object(client, "_request_text", side_effect=fake_request_text):
@@ -366,8 +381,10 @@ class SessionMaxAgeTests(unittest.TestCase):
         def fake_request_text(method, path, data=None, headers=None):
             return valid_json
 
-        with patch.object(client, "_request_text", side_effect=fake_request_text), \
-             patch.object(client, "login") as mock_login:
+        with (
+            patch.object(client, "_request_text", side_effect=fake_request_text),
+            patch.object(client, "login") as mock_login,
+        ):
             result = client._call_api("/vorbesteller/OrderForm.aspx/MenuOffer", {})
 
         # login() should have been called because is_authenticated() returned
@@ -386,8 +403,10 @@ class SessionMaxAgeTests(unittest.TestCase):
         def fake_request_text(method, path, data=None, headers=None):
             return valid_json
 
-        with patch.object(client, "_request_text", side_effect=fake_request_text), \
-             patch.object(client, "login") as mock_login:
+        with (
+            patch.object(client, "_request_text", side_effect=fake_request_text),
+            patch.object(client, "login") as mock_login,
+        ):
             result = client._call_api("/vorbesteller/OrderForm.aspx/MenuOffer", {})
 
         # login() should NOT have been called
@@ -409,7 +428,9 @@ class SessionMaxAgeTests(unittest.TestCase):
         client.cookie_jar.set_cookie(_make_aspxauth_cookie(expires=None))
         client._authenticated_at = time.time()  # fresh session
 
-        html_login_page = '<!DOCTYPE html><html><body><form id="login"></form></body></html>'
+        html_login_page = (
+            '<!DOCTYPE html><html><body><form id="login"></form></body></html>'
+        )
         valid_json = json.dumps({"d": json.dumps({"success": True, "parameter": "[]"})})
 
         call_count = {"n": 0}
@@ -420,8 +441,10 @@ class SessionMaxAgeTests(unittest.TestCase):
                 return html_login_page
             return valid_json
 
-        with patch.object(client, "_request_text", side_effect=fake_request_text), \
-             patch.object(client, "login") as mock_login:
+        with (
+            patch.object(client, "_request_text", side_effect=fake_request_text),
+            patch.object(client, "login") as mock_login,
+        ):
             result = client._call_api("/vorbesteller/OrderForm.aspx/MenuOffer", {})
 
         mock_login.assert_called_once()

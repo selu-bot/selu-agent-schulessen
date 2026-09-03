@@ -17,7 +17,7 @@ capabilities:
         description: Bestelle ein Essen fuer einen bestimmten Tag und ein bestimmtes Menue.
       cancel_order:
         display_name: Essen abbestellen
-        description: Bestelle ein Essen ab oder entferne es aus dem Warenkorb.
+        description: Bestelle ein bestaetigtes Essen nach Pruefung der Stornoerlaubnis ab.
 
 approval:
   tools:

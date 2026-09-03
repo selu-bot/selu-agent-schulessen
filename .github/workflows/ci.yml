@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: capabilities/schulessen/container/requirements*.txt
+      - name: Install build and test dependencies
+        run: python -m pip install -r capabilities/schulessen/container/requirements-build.txt
+      - name: Regression and gRPC contract tests
+        run: python -m unittest discover -s tests -v
+      - name: Dependency consistency
+        run: python -m pip check
+      - name: Audit runtime dependencies
+        run: |
+          python -m pip install pip-audit==2.10.1
+          python -m pip_audit -r capabilities/schulessen/container/requirements.txt
+
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build runtime image
+        run: docker build -t selu-cap-schulessen:test capabilities/schulessen/container
+      - name: Verify restricted runtime and health
+        run: |
+          docker run -d --name schulessen-test --read-only --tmpfs /tmp --network none \
+            --cap-drop ALL --security-opt no-new-privileges selu-cap-schulessen:test
+          test "$(docker inspect --format '{{.Config.User}}' schulessen-test)" = '1000:1000'
+          docker exec schulessen-test python healthcheck.py
+          docker exec schulessen-test python -c 'import importlib.util; assert importlib.util.find_spec("grpc_tools") is None'
+      - name: Container logs and cleanup
+        if: always()
+        run: |
+          docker logs schulessen-test || true
+          docker rm -f schulessen-test || true
